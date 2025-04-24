@@ -1,9 +1,8 @@
-# Provision MySQL 8.4 Cluster with Asynchronous Replication in Docker
+# Provision MySQL 8.4 Cluster with Group Replication in Docker
 
-This setup allows the user to provision a MySQL 8.4 cluster with asynchronous replication using Docker. The setup includes one primary and two replica nodes, all running MySQL 8.4.
+This setup allows the user to provision a MySQL 8.4 cluster with group replication using Docker. The setup includes one primary and two replica nodes, all running MySQL 8.4.
 
 ## Prerequisites
-
 - Docker
 - Docker Compose
 - python3
@@ -13,12 +12,12 @@ This setup allows the user to provision a MySQL 8.4 cluster with asynchronous re
 ## Run the playbook
 
 ```bash
-ansible-playbook mysql-84-async.yml
+ansible-playbook mysql-84-group.yml
 ```
 
 ## Verify the replication
 
-1. Connect to the primary (mysql-async1):
+1. Connect to the primary (mysql-group1):
 
 ```bash
   docker exec -it mysql-async1 mysql -uroot -p{{ root_password }}
@@ -34,7 +33,7 @@ ansible-playbook mysql-84-async.yml
 3. Connect to replicas and verify data is replicated:
 
 ```bash
-  docker exec -it mysql-async2 mysql -uroot -p{{ root_password }}
+  docker exec -it mysql-group2 mysql -uroot -p{{ root_password }}
   USE testdb;
   SELECT * FROM testdb;
 ```
