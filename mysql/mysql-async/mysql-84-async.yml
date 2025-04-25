@@ -16,18 +16,12 @@
 
   tasks:
     - name: Generate a password for replication user
-      community.general.random_string:
-        length: 12
-        upper: true
-        lower: true
-        digits: true
-        special: true
-        override_special: "!@#$%^*=_+-"
-      register: gen_replication_password
-
-    - name: Set replication user password
       set_fact:
-        replication_password: "{{ gen_replication_password.password }}"
+        replication_password: "{{ lookup('community.general.random_string', length=12, override_special='!@#$%^*=_+-') }}"
+
+    # - name: Print the password
+    #   debug:
+    #     var: replication_password
 
     - name: Create Docker network
       community.docker.docker_network:
