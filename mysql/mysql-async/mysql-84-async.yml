@@ -13,6 +13,7 @@
     number_of_nodes: 3
     network_name: "pmm-qa"
     data_dir: "{{ lookup('env', 'HOME') }}/{{ containter_prefix }}-data"
+    pmm_server_name: "pmm-server"
 
   tasks:
     - name: Generate a password for replication user
@@ -135,7 +136,7 @@
 
     - name: Display replication status for each replica
       debug:
-        msg: "{{ replication_status.results[{{ item - 2 }}].stdout | split('\n') }}"
+        msg: "{{ replication_status.results[item - 2].stdout_lines }}"
       loop: "{{ range(2, number_of_nodes + 1) | list }}"
 
     - name: Set verification instructions
@@ -160,9 +161,9 @@
       debug:
         msg: "{{ verification_msg | split('\n') }}"
 
-    # - name: Add mysql cluster nodes to monitoring
-    #   community.docker.docker_container_exec:
-    #     container: {{ pmm_server_name }}
-    #     command: pmm-admin add mysql --cluster=mysql-84-async --replication-set=repl-set84-async --environment=prod --username=root --password={{ root_password }} --service-name={{ containter_prefix }}{{ item }} --host={{ containter_prefix }}{{ item }} --port=3306 --query-source=perfschema --custom-labels='source=perfschema'
-    #   loop: "{{ range(1, number_of_nodes + 1) | list }}"
-    #   ignore_errors: yes
+    - name: Add mysql cluster nodes to monitoring
+      community.docker.docker_container_exec:
+        container: "{{ pmm_server_name }}"
+        command: pmm-admin add mysql --cluster=mysql-84-async --replication-set=repl-set84-async --environment=prod --username=root --password={{ root_password }} --service-name={{ containter_prefix }}{{ item }} --host={{ containter_prefix }}{{ item }} --port=3306 --query-source=perfschema --custom-labels='source=perfschema'
+      loop: "{{ range(1, number_of_nodes + 1) | list }}"
+      ignore_errors: yes

@@ -129,20 +129,22 @@
         container: "{{ containter_prefix }}1"
         command: mysql -uroot -p{{ root_password }} -e "SELECT * FROM performance_schema.replication_group_members;"
       register: replication_status
+      changed_when: false
 
     - name: Display replication status
       debug:
-        var: replication_status.stdout
+        msg: "{{ replication_status.stdout | split('\n') }}"
 
     - name: Check replication group members count
       community.docker.docker_container_exec:
         container: "{{ containter_prefix }}1"
         command: mysql -uroot -p{{ root_password }} -e "SELECT COUNT(*) AS count FROM performance_schema.replication_group_members;"
       register: member_count
+      changed_when: false
 
     - name: Display member count
       debug:
-        var: member_count.stdout
+        msg: "{{ member_count.stdout | split('\n') }}"
 
     - name: Set verification instructions
       set_fact:
@@ -166,9 +168,9 @@
       debug:
         msg: "{{ verification_msg | split('\n') }}"
 
-    # - name: Add mysql cluster nodes to monitoring
-    #   community.docker.docker_container_exec:
-    #     container: {{ pmm_server_name }}
-    #     command: pmm-admin add mysql --cluster=mysql-84-group --replication-set=repl-set84-group --environment=prod --username=root --password={{ root_password }} --service-name={{ containter_prefix }}{{ item }} --host={{ containter_prefix }}{{ item }} --port=3306 --query-source=perfschema --custom-labels='source=perfschema'
-    #   loop: "{{ range(1, number_of_nodes + 1) | list }}"
-    #   ignore_errors: yes
+    - name: Add mysql cluster nodes to monitoring
+      community.docker.docker_container_exec:
+        container: "{{ pmm_server_name }}"
+        command: pmm-admin add mysql --cluster=mysql-84-group --replication-set=repl-set84-group --environment=prod --username=root --password={{ root_password }} --service-name={{ containter_prefix }}{{ item }} --host={{ containter_prefix }}{{ item }} --port=3306 --query-source=perfschema --custom-labels='source=perfschema'
+      loop: "{{ range(1, number_of_nodes + 1) | list }}"
+      ignore_errors: yes
