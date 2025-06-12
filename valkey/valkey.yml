@@ -19,8 +19,8 @@
     valkey_network_name: www
     valkey_data_dir:  "{{ lookup('env', 'HOME') }}/valkey/data"
     valkey_config_dir: "{{ lookup('env', 'HOME') }}/valkey/config"
-    # Make sure to change the password!
-    valkey_password: lijW7490cc9xFn1auO5aoqkaKdrSMfmJ
+    # It will be generated if not provided by the user
+    valkey_password: ""
 
     # Generate complete node list with replicas
     valkey_all_nodes: >-
@@ -78,6 +78,11 @@
         path: "{{ valkey_config_dir }}"
         state: directory
         mode: '0755'
+
+    - name: Generate valkey password if not provided
+      when: valkey_password == ""
+      set_fact:
+        valkey_password: "{{ lookup('community.general.random_string', length=20, min_special=5, override_special='![]{}/|@#$%^*=_+-') }}"
 
     - name: Generate Valkey configuration files
       template:
@@ -218,26 +223,26 @@
       set_fact:
         connection_info: |
           Valkey/Redis Cluster Connection Information:
-
+          ===
           External Cluster Endpoints (from host):
           {% for node in valkey_all_nodes %}
           {{ node.name }} ({{ node.type }}): localhost:{{ node.port }}
           {% endfor %}
-
+          ===
           Internal Cluster Endpoints (from Docker network):
           {% for node in valkey_all_nodes %}
           {{ node.name }} ({{ node.type }}): {{ node.name }}:6379
           {% endfor %}
-
+          ===
           Connection Notes:
-          - Connect to any node - Valkey will handle routing automatically
-          - Primary nodes handle both reads and writes
-          - Replica nodes handle reads and provide high availability
-          - Use Valkey client libraries that support cluster mode
-          - Authentication password: {{ valkey_password }}
-
+          > Connect to any node - Valkey will handle routing automatically
+          > Primary nodes handle both reads and writes
+          > Replica nodes handle reads and provide high availability
+          > Use Valkey client libraries that support cluster mode
+          > Authentication password: {{ valkey_password }}
+          ===
           Example connection (using redis-cli from host):
-          redis-cli -c -a {{ valkey_password }} -h localhost -p {{ valkey_all_nodes[0].port }}
+          redis-cli -c -a '{{ valkey_password }}' -h localhost -p {{ valkey_all_nodes[0].port }}
 
     - name: Display connection information
       debug:
@@ -246,9 +251,6 @@
     - name: Add valkey/redis cluster nodes to monitoring
       community.docker.docker_container_exec:
         container: "{{ pmm_server_name }}"
-        command: pmm-admin add valkey --cluster=valkey-cluster --replication-set=valkey-repl --environment=test --password={{ valkey_password }} --service-name=valkey-svc{{ node_index + 1 }} --host={{ item.name }} --port=6379 --custom-labels='compatibility=redis'
+        command: pmm-admin add valkey --cluster=valkey-cluster --replication-set=valkey-repl --environment=test --password="{{ valkey_password }}" --service-name={{ item.name }}-svc --host={{ item.name }} --port=6379 --custom-labels='compatibility=redis'
       loop: "{{ valkey_all_nodes }}"
-      loop_control:
-        index_var: node_index
       ignore_errors: yes
-

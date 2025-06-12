@@ -18,7 +18,7 @@
   tasks:
     - name: Generate a password for replication user
       set_fact:
-        replication_password: "{{ lookup('community.general.random_string', length=12, override_special='!@#$%^*=_+-') }}"
+        replication_password: "{{ lookup('community.general.random_string', length=20, min_special=5, override_special='![]{}/|@#$%^*=_+-') }}"
 
     # - name: Print the password
     #   debug:
@@ -164,6 +164,6 @@
     - name: Add mysql cluster nodes to monitoring
       community.docker.docker_container_exec:
         container: "{{ pmm_server_name }}"
-        command: pmm-admin add mysql --cluster=mysql-84-async --replication-set=repl-set84-async --environment=prod --username=root --password={{ root_password }} --service-name={{ containter_prefix }}{{ item }} --host={{ containter_prefix }}{{ item }} --port=3306 --query-source=perfschema --custom-labels='source=perfschema'
+        command: pmm-admin add mysql --cluster=mysql-84-async --replication-set=repl-set84-async --environment=prod --username=root --password="{{ root_password }}" --service-name={{ containter_prefix }}{{ item }} --host={{ containter_prefix }}{{ item }} --port=3306 --query-source=perfschema --custom-labels='source=perfschema'
       loop: "{{ range(1, number_of_nodes + 1) | list }}"
       ignore_errors: yes
