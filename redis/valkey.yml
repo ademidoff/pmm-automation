@@ -1,0 +1,254 @@
+---
+- name: Setup Valkey/Redis Cluster
+  hosts: localhost
+  connection: local
+  vars:
+    # Cluster Configuration
+    # Number of shards (min 3, otherwise and odd number)
+    valkey_cluster_nodes: 3
+
+    # Standard listen ports
+    valkey_port: 6379
+    replica_port: 7379
+
+    # Replicas per shard (0 = no replicas, 1 = one replica per shard, etc.)
+    valkey_replicas_per_shard: 1
+
+    # Common settings
+    valkey_image: redis:7
+    valkey_network_name: www
+    valkey_data_dir:  "{{ lookup('env', 'HOME') }}/valkey/data"
+    valkey_config_dir: "{{ lookup('env', 'HOME') }}/valkey/config"
+    # Make sure to change the password!
+    valkey_password: lijW7490cc9xFn1auO5aoqkaKdrSMfmJ
+
+    # Generate complete node list with replicas
+    valkey_all_nodes: >-
+      {%- set nodes = [] -%}
+      {%- for shard in range(valkey_cluster_nodes) -%}
+        {%- set shard_id = shard + 1 -%}
+        {%- set _ = nodes.append({
+          'name': 'valkey' ~ shard_id,
+          'port': valkey_port + shard,
+          'type': 'primary',
+          'node_id': 'node' ~ shard_id,
+          'shard_id': shard_id
+        }) -%}
+        {%- for r in range(valkey_replicas_per_shard) -%}
+          {%- set _ = nodes.append({
+            'name': 'valkey' ~ shard_id ~ '-replica' ~ (r + 1),
+            'port': replica_port + (shard * 100) + r,
+            'type': 'replica',
+            'node_id': 'node' ~ shard_id ~ 'r' ~ (r + 1),
+            'shard_id': shard_id
+          }) -%}
+        {%- endfor -%}
+      {%- endfor -%}
+      {{ nodes }}
+
+    pmm_server_name: pmm-server
+
+  tasks:
+    - name: Set cluster topology fact
+      set_fact:
+        cluster_topology: |
+          Valkey/Redis Cluster Topology:
+          Shards: {{ valkey_cluster_nodes }}
+          Replicas per shard: {{ valkey_replicas_per_shard }}
+          Total nodes: {{ valkey_all_nodes | length }}
+
+          Node Details:
+          {% for node in valkey_all_nodes %}
+          {{ node.name }} ({{ node.type }}): port {{ node.port }}, directory: {{ node.node_id }}
+          {% endfor %}
+
+    - name: Debug - Show cluster topology
+      debug:
+        msg: "{{ cluster_topology | split('\n') }}"
+
+    - name: Create Valkey data directories
+      file:
+        path: "{{ valkey_data_dir }}/{{ item.node_id }}"
+        state: directory
+        mode: '0755'
+      loop: "{{ valkey_all_nodes }}"
+
+    - name: Create Valkey config directory
+      file:
+        path: "{{ valkey_config_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Generate Valkey configuration files
+      template:
+        src: valkey.conf.j2
+        dest: "{{ valkey_config_dir }}/{{ item.node_id }}.conf"
+        mode: '0644'
+      loop: "{{ valkey_all_nodes }}"
+      vars:
+        node: "{{ item }}"
+
+    - name: Create Docker network for Valkey cluster
+      docker_network:
+        name: "{{ valkey_network_name }}"
+        driver: bridge
+
+    - name: Start Valkey containers
+      docker_container:
+        name: "{{ item.name }}"
+        image: "{{ valkey_image }}"
+        state: started
+        restart_policy: unless-stopped
+        networks:
+          - name: "{{ valkey_network_name }}"
+        ports:
+          - "{{ item.port }}:6379"
+        volumes:
+          - "{{ valkey_data_dir }}/{{ item.node_id }}:/data"
+          - "{{ valkey_config_dir }}/{{ item.node_id }}.conf:/usr/local/etc/redis/redis.conf"
+        command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+        healthcheck:
+          test: ["CMD", "redis-cli", "ping"]
+          interval: 30s
+          timeout: 10s
+          retries: 3
+      loop: "{{ valkey_all_nodes }}"
+
+    - name: Wait for all Valkey instances to be ready
+      wait_for:
+        host: localhost
+        port: "{{ item.port }}"
+        delay: 3
+        timeout: 30
+      loop: "{{ valkey_all_nodes }}"
+
+    - name: Verify Valkey instances are running in cluster mode
+      community.docker.docker_container_exec:
+        container: "{{ item.name }}"
+        command: redis-cli -a {{ valkey_password }} info cluster
+      loop: "{{ valkey_all_nodes }}"
+      register: cluster_mode_check
+      failed_when: "'cluster_enabled:1' not in cluster_mode_check.stdout"
+
+    - name: Initialize Valkey Cluster
+      community.docker.docker_container_exec:
+        container: "{{ valkey_all_nodes[0].name }}"
+        command: >
+          redis-cli -a {{ valkey_password }} --cluster create
+          {% for node in valkey_all_nodes -%}
+          {{ node.name }}:6379{% if not loop.last %} {% endif %}
+          {%- endfor %}
+          --cluster-replicas {{ valkey_replicas_per_shard }} --cluster-yes
+      run_once: true
+      register: cluster_init
+      failed_when: 
+        - cluster_init.rc != 0
+        - "'Node is already part of a cluster' not in cluster_init.stderr"
+        - "'already in cluster mode' not in cluster_init.stderr"
+
+    - name: Wait for cluster to stabilize
+      pause:
+        seconds: 10
+
+    - name: Get cluster info
+      community.docker.docker_container_exec:
+        container: "{{ valkey_all_nodes[0].name }}"
+        command: redis-cli -a {{ valkey_password }} cluster info
+      register: cluster_info
+
+    - name: Get cluster nodes
+      community.docker.docker_container_exec:
+        container: "{{ valkey_all_nodes[0].name }}"
+        command: redis-cli -a {{ valkey_password }} cluster nodes
+      register: cluster_nodes
+
+    - name: Get cluster slots
+      community.docker.docker_container_exec:
+        container: "{{ valkey_all_nodes[0].name }}"
+        command: redis-cli -a {{ valkey_password }} cluster slots
+      register: cluster_slots
+
+    - name: Set cluster status fact
+      set_fact:
+        cluster_status: |
+          === Redis Cluster Information ===
+          {{ cluster_info.stdout }}
+          === Cluster Nodes ===
+          {{ cluster_nodes.stdout }}
+          === Cluster Slots ===
+          {{ cluster_slots.stdout }}
+
+    - name: Display cluster status
+      debug:
+        msg: "{{ cluster_status | split('\n') }}"
+
+    - name: Test cluster write operations
+      community.docker.docker_container_exec:
+        container: "{{ valkey_all_nodes[0].name }}"
+        command: redis-cli -a {{ valkey_password }} -c set test-key-{{ item }} "Test value {{ item }}"
+      register: cluster_write_test
+      loop: [1, 2, 3]
+
+    - name: Test cluster read operations
+      community.docker.docker_container_exec:
+        container: "{{ valkey_all_nodes[0].name }}"
+        command: redis-cli -a {{ valkey_password }} -c get test-key-{{ item }}
+      register: cluster_read_test
+      loop: [1, 2, 3]
+
+    - name: Set test results fact
+      set_fact:
+        test_results: |
+          === Cluster Functionality Test Results ===
+          Write Tests:
+          {% for result in cluster_write_test.results %}
+          Key test-key-{{ loop.index }}: {{ result.stdout | default('FAILED') }}
+          {% endfor %}
+
+          Read Tests:
+          {% for result in cluster_read_test.results %}
+          Key test-key-{{ loop.index }}: {{ result.stdout | default('FAILED') }}
+          {% endfor %}
+
+    - name: Dsiplay test results
+      debug:
+        msg: "{{ test_results | split('\n') }}"
+
+    - name: Set connection information fact
+      set_fact:
+        connection_info: |
+          Valkey/Redis Cluster Connection Information:
+
+          External Cluster Endpoints (from host):
+          {% for node in valkey_all_nodes %}
+          {{ node.name }} ({{ node.type }}): localhost:{{ node.port }}
+          {% endfor %}
+
+          Internal Cluster Endpoints (from Docker network):
+          {% for node in valkey_all_nodes %}
+          {{ node.name }} ({{ node.type }}): {{ node.name }}:6379
+          {% endfor %}
+
+          Connection Notes:
+          - Connect to any node - Valkey will handle routing automatically
+          - Primary nodes handle both reads and writes
+          - Replica nodes handle reads and provide high availability
+          - Use Valkey client libraries that support cluster mode
+          - Authentication password: {{ valkey_password }}
+
+          Example connection (using redis-cli from host):
+          redis-cli -c -a {{ valkey_password }} -h localhost -p {{ valkey_all_nodes[0].port }}
+
+    - name: Display connection information
+      debug:
+        msg: "{{ connection_info | split('\n') }}"
+
+    - name: Add valkey/redis cluster nodes to monitoring
+      community.docker.docker_container_exec:
+        container: "{{ pmm_server_name }}"
+        command: pmm-admin add valkey --cluster=valkey-cluster --replication-set=valkey-repl --environment=test --password={{ valkey_password }} --service-name=valkey-svc{{ node_index + 1 }} --host={{ item.name }} --port=6379 --custom-labels='compatibility=redis'
+      loop: "{{ valkey_all_nodes }}"
+      loop_control:
+        index_var: node_index
+      ignore_errors: yes
+

@@ -2,7 +2,7 @@
 
 This repository contains a collection of automation scripts for a variety of tasks related to PMM (Percona Monitoring and Management). The scripts are designed to simplify and automate common tasks, making it easier to manage and monitor your PMM environment.
 
-## Provision MySQL
+## MySQL
 
 ### MySQL Cluster with Async Replication
 
@@ -11,3 +11,9 @@ This script provisions a [MySQL cluster](./mysql/mysql-async/README.md) with asy
 ### MySQL Cluster with Group Replication
 
 This script provisions a [MySQL cluster](./mysql/mysql-group/README.md) with group replication. It configures the cluster and ensures that all nodes are properly synchronized.
+
+## Valkey/Redis
+
+### Valkey/Redis with Async Replication
+
+This script provisions a Valkey/Redis multi-master cluster with the necessary configurations. It sets up the cluster to ensure high availability and performance.
