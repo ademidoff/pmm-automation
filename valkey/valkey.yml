@@ -56,7 +56,8 @@
           Shards: {{ valkey_cluster_nodes }}
           Replicas per shard: {{ valkey_replicas_per_shard }}
           Total nodes: {{ valkey_all_nodes | length }}
-
+          ===
+          {% for node in valkey_all_nodes %}
           Node Details:
           {% for node in valkey_all_nodes %}
           {{ node.name }} ({{ node.type }}): port {{ node.port }}, directory: {{ node.node_id }}
@@ -82,7 +83,7 @@
     - name: Generate valkey password if not provided
       when: valkey_password == ""
       set_fact:
-        valkey_password: "{{ lookup('community.general.random_string', length=20, min_special=5, override_special='![]{}/|@#$%^*=_+-') }}"
+        valkey_password: "{{ lookup('community.general.random_string', length=20, min_special=5, min_upper=2, override_special='!?()[]{}:;/|@#$%&^*<>=_+-') }}"
 
     - name: Generate Valkey configuration files
       template:
@@ -123,7 +124,7 @@
       wait_for:
         host: localhost
         port: "{{ item.port }}"
-        delay: 3
+        delay: 1
         timeout: 30
       loop: "{{ valkey_all_nodes }}"
 

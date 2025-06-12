@@ -21,7 +21,7 @@
   tasks:
     - name: Generate a password for replication user
       set_fact:
-        replication_password: "{{ lookup('community.general.random_string', length=20, min_special=5, override_special='![]{}/|@#$%^*=_+-') }}"
+        replication_password: "{{ lookup('community.general.random_string', length=20, min_special=5, min_upper=2, override_special='!?()[]{}:;/|@#$%&^*<>=_+-') }}"
 
     # - name: Print the password
     #   debug:
