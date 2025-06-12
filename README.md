@@ -1,6 +1,6 @@
 # PMM Automation Scripts
 
-This repository contains a collection of automation scripts for a variety of tasks related to PMM (Percona Monitoring and Management). The scripts are designed to simplify and automate common tasks, making it easier to manage and monitor your PMM environment.
+This repository contains a collection of automation scripts for a variety of tasks related to PMM (Percona Monitoring and Management). The scripts are designed to simplify and automate common tasks, making it easier to manage and monitor your environments.
 
 ## MySQL
 
