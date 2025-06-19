@@ -131,7 +131,7 @@
     - name: Verify Valkey instances are running in cluster mode
       community.docker.docker_container_exec:
         container: "{{ item.name }}"
-        command: redis-cli -a {{ valkey_password }} info cluster
+        command: redis-cli -a "{{ valkey_password }}" info cluster
       loop: "{{ valkey_all_nodes }}"
       register: cluster_mode_check
       failed_when: "'cluster_enabled:1' not in cluster_mode_check.stdout"
@@ -140,7 +140,7 @@
       community.docker.docker_container_exec:
         container: "{{ valkey_all_nodes[0].name }}"
         command: >
-          redis-cli -a {{ valkey_password }} --cluster create
+          redis-cli -a "{{ valkey_password }}" --cluster create
           {% for node in valkey_all_nodes -%}
           {{ node.name }}:6379{% if not loop.last %} {% endif %}
           {%- endfor %}
@@ -159,19 +159,19 @@
     - name: Get cluster info
       community.docker.docker_container_exec:
         container: "{{ valkey_all_nodes[0].name }}"
-        command: redis-cli -a {{ valkey_password }} cluster info
+        command: redis-cli -a "{{ valkey_password }}" cluster info
       register: cluster_info
 
     - name: Get cluster nodes
       community.docker.docker_container_exec:
         container: "{{ valkey_all_nodes[0].name }}"
-        command: redis-cli -a {{ valkey_password }} cluster nodes
+        command: redis-cli -a "{{ valkey_password }}" cluster nodes
       register: cluster_nodes
 
     - name: Get cluster slots
       community.docker.docker_container_exec:
         container: "{{ valkey_all_nodes[0].name }}"
-        command: redis-cli -a {{ valkey_password }} cluster slots
+        command: redis-cli -a "{{ valkey_password }}" cluster slots
       register: cluster_slots
 
     - name: Set cluster status fact
@@ -191,14 +191,14 @@
     - name: Test cluster write operations
       community.docker.docker_container_exec:
         container: "{{ valkey_all_nodes[0].name }}"
-        command: redis-cli -a {{ valkey_password }} -c set test-key-{{ item }} "Test value {{ item }}"
+        command: redis-cli -a "{{ valkey_password }}" -c set test-key-{{ item }} "Test value {{ item }}"
       register: cluster_write_test
       loop: [1, 2, 3]
 
     - name: Test cluster read operations
       community.docker.docker_container_exec:
         container: "{{ valkey_all_nodes[0].name }}"
-        command: redis-cli -a {{ valkey_password }} -c get test-key-{{ item }}
+        command: redis-cli -a "{{ valkey_password }}" -c get test-key-{{ item }}
       register: cluster_read_test
       loop: [1, 2, 3]
 

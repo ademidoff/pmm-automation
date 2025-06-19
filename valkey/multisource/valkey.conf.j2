@@ -7,8 +7,8 @@ port 6379
 protected-mode no
 
 # Authentication
-requirepass {{ valkey_password }}
-masterauth {{ valkey_password }}
+requirepass "{{ valkey_password }}"
+masterauth "{{ valkey_password }}"
 
 # Redis Cluster Configuration
 cluster-enabled yes
