@@ -60,7 +60,7 @@
     - name: Generate a password if not provided
       when: valkey_password == ""
       set_fact:
-        valkey_password: "{{ lookup('community.general.random_string', length=20) }}"
+        valkey_password: "{{ lookup('community.general.random_string', length=20, min_special=5, min_upper=2, override_special='!?()[]{}:;/|@#$%&^*<>=_+-') }}"
 
     - name: Display generated Valkey password
       debug:
@@ -147,7 +147,7 @@
           - "{{ valkey_config_dir }}/sentinel-{{ item }}.conf:/usr/local/etc/valkey/sentinel.conf"
         command: ["valkey-sentinel", "/usr/local/etc/valkey/sentinel.conf"]
         healthcheck:
-          test: ["CMD", "valkey-cli", "-p", "26379", "ping"]
+          test: ["CMD", "valkey-cli", "-p", "{{ sentinel_start_port }}", "ping"]
           interval: 10s
           timeout: 5s
           retries: 5
@@ -174,7 +174,7 @@
     - name: Run Sentinel status command
       community.docker.docker_container_exec:
         container: "sentinel-1"
-        command: valkey-cli -p 26379 sentinel masters
+        command: valkey-cli -p {{ sentinel_start_port }} sentinel masters
       register: sentinel_status
 
     - name: Display Sentinel status
@@ -196,7 +196,7 @@
 
     - name: Add Sentinels to monitoring
       community.docker.docker_container_exec:
-        container: "sentinel-{{ item }}"
+        container: "{{ pmm_server_name }}"
         command: pmm-admin add valkey --cluster=valkey-cluster --environment=valkey-test --username=default --password="{{ valkey_password }}" --service-name=sentinel{{ item }}-svc --host=sentinel-{{ item }} --port={{ sentinel_start_port + item - 1}} --custom-labels='role=sentinel'
       loop: "{{ range(1, sentinel_count + 1) | list }}"
       ignore_errors: yes
