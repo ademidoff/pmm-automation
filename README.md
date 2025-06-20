@@ -16,7 +16,7 @@ This playbook provisions a [MySQL cluster](./mysql/mysql-group/README.md) with g
 
 ### Valkey/Redis Multi-Source Cluster with Replication
 
-This playbook provisions a Valkey/Redis multi-master cluster with replication between the nodes. It sets up the cluster with redundancy to prevent data loss.
+This playbook provisions a Valkey/Redis multi-source cluster with replication between the nodes. It sets up the cluster with redundancy to prevent data loss.
 
 The following diagram help visualize the cluster network topology:
 
