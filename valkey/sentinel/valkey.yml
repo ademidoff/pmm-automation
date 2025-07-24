@@ -31,7 +31,7 @@
         state: directory
         mode: '0755'
 
-    - name: Create config directories for each Sentinel
+    - name: Create a config directory per Sentinel
       file:
         path: "{{ valkey_config_dir }}/sentinel-{{ item }}"
         state: directory
