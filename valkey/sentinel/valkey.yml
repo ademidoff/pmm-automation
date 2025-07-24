@@ -31,6 +31,13 @@
         state: directory
         mode: '0755'
 
+    - name: Create config directories for each Sentinel
+      file:
+        path: "{{ valkey_config_dir }}/sentinel-{{ item }}"
+        state: directory
+        mode: '0755'
+      loop: "{{ range(1, sentinel_count + 1) | list }}"
+
     - name: Create data directory
       file:
         path: "{{ valkey_data_dir }}"
@@ -53,8 +60,8 @@
     - name: Generate Sentinel configurations
       template:
         src: sentinel.conf.j2
-        dest: "{{ valkey_config_dir }}/sentinel-{{ item }}.conf"
-        mode: '0644'
+        dest: "{{ valkey_config_dir }}/sentinel-{{ item }}/sentinel.conf"
+        mode: '0664'
       loop: "{{ range(1, sentinel_count + 1) | list }}"
 
     - name: Generate a password if not provided
@@ -144,7 +151,7 @@
         ports:
           - "{{ sentinel_start_port + item - 1 }}:26379"
         volumes:
-          - "{{ valkey_config_dir }}/sentinel-{{ item }}.conf:/usr/local/etc/valkey/sentinel.conf"
+          - "{{ valkey_config_dir }}/sentinel-{{ item }}:/usr/local/etc/valkey"
         command: ["valkey-sentinel", "/usr/local/etc/valkey/sentinel.conf"]
         healthcheck:
           test: ["CMD", "valkey-cli", "-p", "{{ sentinel_start_port }}", "ping"]
