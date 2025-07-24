@@ -197,6 +197,6 @@
     - name: Add Sentinels to monitoring
       community.docker.docker_container_exec:
         container: "{{ pmm_server_name }}"
-        command: pmm-admin add valkey --cluster=valkey-cluster --environment=valkey-test --username=default --password="{{ valkey_password }}" --service-name=sentinel{{ item }}-svc --host=sentinel-{{ item }} --port={{ sentinel_start_port + item - 1}} --custom-labels='role=sentinel'
+        command: pmm-admin add valkey --cluster=valkey-cluster --environment=valkey-test --username=default --password="{{ valkey_password }}" --service-name=sentinel{{ item }}-svc --host=sentinel-{{ item }} --port={{ sentinel_start_port }} --custom-labels='role=sentinel'
       loop: "{{ range(1, sentinel_count + 1) | list }}"
       ignore_errors: yes
