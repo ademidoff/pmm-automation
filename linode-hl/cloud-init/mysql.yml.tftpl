@@ -1,0 +1,118 @@
+#cloud-config
+
+manage_etc_hosts: true
+
+write_files:
+  - path: /root/setup.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      exec >  >(tee -a /root/stackscript.log)
+      exec 2> >(tee -a /root/stackscript.log >&2)
+
+      PMM_SERVER='${pmm_server_host}'
+      PMM_PASSWORD='${pmm_admin_password}'
+      PMM_CLIENT_IMAGE='${pmm_client_image}'
+      PMM_CLIENTS_PER_DB='${pmm_clients_per_db}'
+      METRICS_MODE='${metrics_mode}'
+      MYSQL_IMAGE='${mysql_image}'
+      MYSQL_PASSWORD='${mysql_password}'
+      INSTANCE_LABEL='${instance_label}'
+
+      echo "Waiting for PMM Server at $PMM_SERVER..."
+      until [ "$(curl -sk -o /dev/null -w '%%{http_code}' --max-time 5 https://$PMM_SERVER/v1/server/readyz 2>/dev/null)" = "200" ]; do
+          sleep 5
+      done
+      echo "PMM Server is reachable"
+
+      echo 1 > /proc/sys/vm/swappiness
+
+      echo "$INSTANCE_LABEL" > /etc/hostname
+      hostname -F /etc/hostname
+
+      public_ip=$(ip route get 8.8.8.8 | awk -F"src " 'NR==1{split($2,a," ");print a[1]}')
+
+      docker network create pmm-qa
+      docker run --name ps-server \
+          -e PERCONA_TELEMETRY_DISABLE=1 \
+          -e MYSQL_ROOT_PASSWORD=${mysql_password} \
+          --network pmm-qa \
+          -d "$MYSQL_IMAGE" \
+          --default-authentication-plugin=mysql_native_password
+
+      echo "Waiting for MySQL to accept connections..."
+      until docker exec ps-server mysql -u root -p${mysql_password} -h 127.0.0.1 -e "SELECT 1" >/dev/null 2>&1; do
+          sleep 2
+      done
+
+      docker exec ps-server mysql -u root -p${mysql_password} -e "set global max_connections=1000"
+      docker exec ps-server mysql -u root -p${mysql_password} -e "CREATE SCHEMA sbtest;"
+      docker exec ps-server mysql -u root -p${mysql_password} -e "CREATE USER sbtest@'%' IDENTIFIED WITH mysql_native_password BY '${mysql_password}';"
+      docker exec ps-server mysql -u root -p${mysql_password} -e "GRANT ALL PRIVILEGES ON sbtest.* to sbtest@'%';"
+
+      docker run --rm --network=pmm-qa --name=sb-prepare perconalab/sysbench:latest sysbench \
+              --db-driver=mysql \
+              --table-size=100000 \
+              --tables=24 \
+              --threads=4 \
+              --mysql-host=ps-server \
+              --mysql-port=3306 \
+              --mysql-user=sbtest \
+              --mysql-password=${mysql_password} \
+              /usr/share/sysbench/oltp_read_write.lua prepare
+
+      echo "Generating PMM client compose file ($PMM_CLIENTS_PER_DB instances)..."
+      cat > /root/docker-compose.client.yml <<HDR_EOF
+      services:
+      HDR_EOF
+
+      for i in $(seq 1 "$PMM_CLIENTS_PER_DB"); do
+        cat >> /root/docker-compose.client.yml <<SVC_EOF
+        pmm-client-$i:
+          container_name: pmm-client-$i
+          image: $PMM_CLIENT_IMAGE
+          restart: unless-stopped
+          environment:
+            PMM_AGENT_SERVER_ADDRESS: "$PMM_SERVER:443"
+            PMM_AGENT_SERVER_USERNAME: "admin"
+            PMM_AGENT_SERVER_PASSWORD: "$PMM_PASSWORD"
+            PMM_AGENT_SERVER_INSECURE_TLS: "1"
+            PMM_AGENT_CONFIG_FILE: "config/pmm-agent.yaml"
+            PMM_AGENT_SETUP: "1"
+            PMM_AGENT_SETUP_FORCE: "1"
+            PMM_AGENT_SETUP_NODE_NAME: "mysql-$INSTANCE_LABEL-$i"
+            PMM_AGENT_PRERUN_SCRIPT: |
+              pmm-admin status --wait=10s
+              pmm-admin add mysql --cluster=mysql --environment=load-mysql --custom-labels='tech=mysql' --username=root --password=$MYSQL_PASSWORD --query-source=perfschema --metrics-mode=$METRICS_MODE --host=ps-server "$INSTANCE_LABEL-$i"
+          networks:
+            - pmm-qa
+      SVC_EOF
+      done
+
+      cat >> /root/docker-compose.client.yml <<FTR_EOF
+      networks:
+        pmm-qa:
+          external: true
+      FTR_EOF
+
+      echo "Launching $PMM_CLIENTS_PER_DB PMM client containers via docker compose..."
+      docker compose -f /root/docker-compose.client.yml up -d
+      sleep 15
+
+      echo "Starting continuous sysbench OLTP workload..."
+      docker run -d --name=sb-run --network=pmm-qa perconalab/sysbench:latest sysbench \
+          --db-driver=mysql \
+          --report-interval=10 \
+          --mysql-storage-engine=innodb \
+          --table-size=100000 \
+          --tables=24 \
+          --threads=4 \
+          --time=0 \
+          --mysql-host=ps-server \
+          --mysql-port=3306 \
+          --mysql-user=sbtest \
+          --mysql-password=${mysql_password} \
+          /usr/share/sysbench/oltp_read_write.lua run
+
+runcmd:
+  - /root/setup.sh

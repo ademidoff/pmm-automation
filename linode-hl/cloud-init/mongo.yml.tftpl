@@ -1,0 +1,133 @@
+#cloud-config
+
+manage_etc_hosts: true
+
+write_files:
+  - path: /root/setup.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      exec >  >(tee -a /root/stackscript.log)
+      exec 2> >(tee -a /root/stackscript.log >&2)
+
+      PMM_SERVER='${pmm_server_host}'
+      PMM_PASSWORD='${pmm_admin_password}'
+      PMM_CLIENT_IMAGE='${pmm_client_image}'
+      PMM_CLIENTS_PER_DB='${pmm_clients_per_db}'
+      METRICS_MODE='${metrics_mode}'
+      MONGO_IMAGE='${mongo_image}'
+      MONGO_PASSWORD='${mongo_password}'
+      INSTANCE_LABEL='${instance_label}'
+
+      echo "Waiting for PMM Server at $PMM_SERVER..."
+      until [ "$(curl -sk -o /dev/null -w '%%{http_code}' --max-time 5 https://$PMM_SERVER/v1/server/readyz 2>/dev/null)" = "200" ]; do
+          sleep 5
+      done
+      echo "PMM Server is reachable"
+
+      echo 1 > /proc/sys/vm/swappiness
+
+      echo "$INSTANCE_LABEL" > /etc/hostname
+      hostname -F /etc/hostname
+
+      docker network create pmm-qa
+
+      echo "Starting MongoDB container"
+      docker pull "$MONGO_IMAGE"
+      docker run -d --network pmm-qa --name mongo-container \
+        -e MONGO_INITDB_ROOT_USERNAME=mongoadmin \
+        -e MONGO_INITDB_ROOT_PASSWORD=${mongo_password} \
+        --log-driver json-file \
+        --log-opt max-size=100m \
+        --log-opt max-file=1 \
+        "$MONGO_IMAGE"
+      sleep 30
+
+      echo "Enabling MongoDB profiler"
+      docker exec mongo-container mongosh \
+        -u mongoadmin \
+        -p ${mongo_password} \
+        --authenticationDatabase admin \
+        --quiet \
+        --eval 'db.setProfilingLevel(2, {slowms: 0}); db.getSiblingDB("test").setProfilingLevel(2, {slowms: 0}); print("Profiler enabled");'
+      sleep 5
+
+      echo "Creating PMM user"
+      docker cp /tmp/create_pmm_user.js mongo-container:/tmp/create_pmm_user.js
+      docker exec mongo-container mongosh -u mongoadmin -p ${mongo_password} --authenticationDatabase admin /tmp/create_pmm_user.js
+      sleep 5
+
+      echo "Generating PMM client compose file ($PMM_CLIENTS_PER_DB instances)..."
+      cat > /root/docker-compose.client.yml <<HDR_EOF
+      services:
+      HDR_EOF
+
+      for i in $(seq 1 "$PMM_CLIENTS_PER_DB"); do
+        cat >> /root/docker-compose.client.yml <<SVC_EOF
+        pmm-client-$i:
+          container_name: pmm-client-$i
+          image: $PMM_CLIENT_IMAGE
+          restart: unless-stopped
+          environment:
+            PMM_AGENT_SERVER_ADDRESS: "$PMM_SERVER:443"
+            PMM_AGENT_SERVER_USERNAME: "admin"
+            PMM_AGENT_SERVER_PASSWORD: "$PMM_PASSWORD"
+            PMM_AGENT_SERVER_INSECURE_TLS: "1"
+            PMM_AGENT_CONFIG_FILE: "config/pmm-agent.yaml"
+            PMM_AGENT_SETUP: "1"
+            PMM_AGENT_SETUP_FORCE: "1"
+            PMM_AGENT_SETUP_NODE_NAME: "mongo-$INSTANCE_LABEL-$i"
+            PMM_AGENT_PRERUN_SCRIPT: |
+              pmm-admin status --wait=10s
+              pmm-admin add mongodb --cluster=mongo --environment=load-mongo --custom-labels='tech=mongo' --username=pmm --password=$MONGO_PASSWORD --metrics-mode=$METRICS_MODE --host=mongo-container "$INSTANCE_LABEL-$i"
+          networks:
+            - pmm-qa
+      SVC_EOF
+      done
+
+      cat >> /root/docker-compose.client.yml <<FTR_EOF
+      networks:
+        pmm-qa:
+          external: true
+      FTR_EOF
+
+      echo "Launching $PMM_CLIENTS_PER_DB PMM client containers via docker compose..."
+      docker compose -f /root/docker-compose.client.yml up -d
+      sleep 15
+
+      docker cp /usr/local/bin/load-generator.js mongo-container:/usr/local/bin/load-generator.js
+
+      echo "Starting load generator"
+      pkill -f "mongo-load-gen.sh" 2>/dev/null || true
+      sleep 2
+      nohup /usr/local/bin/mongo-load-gen.sh 127.0.0.1 27017 mongoadmin ${mongo_password} > /var/log/mongo-load-gen.log 2>&1 &
+      LOAD_PID=$!
+      echo "Load generator started with PID: $LOAD_PID"
+      sleep 10
+
+      echo ""
+      echo "DEPLOYMENT COMPLETED"
+      echo "PMM Server: $PMM_SERVER"
+
+  - path: /tmp/create_pmm_user.js
+    permissions: "0644"
+    content: |
+      ${create_pmm_user_js}
+
+  - path: /usr/local/bin/load-generator.js
+    permissions: "0755"
+    content: |
+      ${load_generator_js}
+
+  - path: /usr/local/bin/mongo-load-gen.sh
+    permissions: "0755"
+    content: |
+      ${mongo_load_gen_sh}
+
+  - path: /usr/local/bin/check-profiler.sh
+    permissions: "0755"
+    content: |
+      ${check_profiler_sh}
+
+runcmd:
+  - /root/setup.sh

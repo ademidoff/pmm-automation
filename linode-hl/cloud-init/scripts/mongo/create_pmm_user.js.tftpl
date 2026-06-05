@@ -1,0 +1,32 @@
+try {
+  db.getSiblingDB("admin").dropUser("pmm");
+  print("Old PMM user dropped");
+} catch(e) {
+  print("No existing PMM user");
+}
+
+db.getSiblingDB("admin").createRole({
+  role: "pmmRole",
+  privileges: [
+    {
+      resource: {db: "", collection: ""},
+      actions: ["collStats", "dbHash", "dbStats", "find", "listIndexes", "listCollections", "serverStatus", "getParameter", "listDatabases"]
+    },
+    {
+      resource: {db: "", collection: "system.profile"},
+      actions: ["find", "dbStats", "collStats"]
+    }
+  ],
+  roles: []
+});
+
+db.getSiblingDB("admin").createUser({
+  user: "pmm",
+  pwd: "${mongo_password}",
+  roles: [
+    {role: "pmmRole", db: "admin"},
+    {role: "clusterMonitor", db: "admin"}
+  ]
+});
+
+print("PMM user created");

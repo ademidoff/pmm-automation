@@ -1,0 +1,57 @@
+#cloud-config
+
+hostname: pmm-server
+manage_etc_hosts: true
+
+write_files:
+  - path: /root/pmm3-server.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+
+      # Added logging for debug purposes
+      exec >  >(tee -a /root/stackscript.log)
+      exec 2> >(tee -a /root/stackscript.log >&2)
+
+      # Change the swappiness to 1 to prevent swapping and improve performance.
+      echo 1 > /proc/sys/vm/swappiness
+
+      # Set the hostname.
+      HOSTNAME="pmm-$(openssl rand -hex 3)"
+      echo "$HOSTNAME" > /etc/hostname
+      hostname -F /etc/hostname
+
+      docker network create pmm-qa
+      docker volume create pmm-data
+
+      docker run -d \
+          -p 443:8443 \
+          --volume pmm-data:/srv \
+          --name pmm-server \
+          --hostname pmm-server \
+          --network pmm-qa \
+          --restart always \
+          -e PMM_DEV_PERCONA_PLATFORM_ADDRESS=https://check-dev.percona.com:443 \
+          -e GF_SECURITY_ADMIN_PASSWORD='${pmm_admin_password}' \
+          -e PMM_ENABLE_TELEMETRY=0 \
+          '${pmm_docker_image}'
+
+      echo "Waiting for PMM container to become healthy..."
+      timeout=60
+      elapsed=0
+      until [ "$(docker inspect --format='{{.State.Health.Status}}' pmm-server 2>/dev/null)" = "healthy" ]; do
+          if [ "$elapsed" -ge "$timeout" ]; then
+              echo "ERROR: PMM container did not become healthy within $${timeout}s"
+              docker logs pmm-server
+              exit 1
+          fi
+          sleep 5
+          elapsed=$((elapsed + 5))
+      done
+      echo "PMM container is healthy after $${elapsed}s"
+
+      echo "PMM admin password: ${pmm_admin_password}"
+      docker logs pmm-server
+
+runcmd:
+  - /root/pmm3-server.sh

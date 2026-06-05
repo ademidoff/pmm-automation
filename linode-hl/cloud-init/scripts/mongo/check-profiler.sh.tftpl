@@ -1,0 +1,28 @@
+#!/bin/bash
+docker exec mongo-container mongosh -u mongoadmin -p ${mongo_password} --authenticationDatabase admin --quiet << 'PROFILER_CHECK_SCRIPT'
+var testCount = db.getSiblingDB("test").system.profile.countDocuments({ns: {$ne: "test.system.profile"}});
+var adminCount = db.system.profile.countDocuments({});
+
+print("MongoDB Profiler Status");
+print("======================");
+print("");
+print("Admin DB Records: " + adminCount);
+print("Test DB Records: " + testCount);
+print("User Queries: " + testCount);
+
+var pipeline = [
+  {$match: {ns: {$ne: "test.system.profile"}}},
+  {$group: {_id: "$op", count: {$sum: 1}, avgDuration: {$avg: "$millis"}}},
+  {$sort: {count: -1}}
+];
+
+var results = db.getSiblingDB("test").system.profile.aggregate(pipeline).toArray();
+
+print("");
+print("Query Breakdown");
+print("===============");
+
+results.forEach(result => {
+  print(result._id.padEnd(10) + " Count: " + result.count.toString().padStart(6) + " Avg: " + result.avgDuration.toFixed(2) + "ms");
+});
+PROFILER_CHECK_SCRIPT
